@@ -27,7 +27,7 @@ app.post("/createPaymongoCheckout", async (req, res) => {
   const { amount, customerName, email, description, paymentType } = req.body;
 
   if (!amount || !customerName || !email || !paymentType) {
-    return res.status(400).json({ error: "Missing required fields" });
+    return res.status(400).json({ error: "Missing required fieldsassasd" });
   }
 
   try {
