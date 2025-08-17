@@ -24,9 +24,9 @@ const getAuthHeader = () => {
 };
 
 app.post("/createPaymongoCheckout", async (req, res) => {
-  const { amount, customerName, email, description } = req.body;
+  const { amount, customerName, email, description, paymentType } = req.body;
 
-  if (!amount || !customerName || !email) {
+  if (!amount || !customerName || !email || !paymentType) {
     return res.status(400).json({ error: "Missing required fields" });
   }
 
@@ -41,9 +41,9 @@ app.post("/createPaymongoCheckout", async (req, res) => {
       body: JSON.stringify({
         data: {
           attributes: {
-            amount: Math.round(amount * 100), // PHP → centavos
+            amount: Math.round(amount * 100),
             currency: "PHP",
-            payment_method_allowed: ["gcash", "grab_pay", "paymaya", "card", "qrph"],
+            payment_method_allowed: [paymentType], // use selected type
             payment_method_options: { card: { request_three_d_secure: "any" } },
             description: description || "Project Payment",
           },
@@ -56,7 +56,7 @@ app.post("/createPaymongoCheckout", async (req, res) => {
 
     const paymentIntentId = intentData.data.id;
 
-    // 2️⃣ Create Payment Method (GCash/QR)
+    // 2️⃣ Create Payment Method
     const methodResponse = await fetch("https://api.paymongo.com/v1/payment_methods", {
       method: "POST",
       headers: {
@@ -66,7 +66,7 @@ app.post("/createPaymongoCheckout", async (req, res) => {
       body: JSON.stringify({
         data: {
           attributes: {
-            type: "gcash", // Could be "paymaya", "qrph" etc.
+            type: paymentType,
             billing: { name: customerName, email: email },
           },
         },
