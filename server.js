@@ -22,6 +22,8 @@ const getAuthHeader = () => {
 };
 
 app.post("/createPaymongoCheckout", async (req, res) => {
+    console.log("Received request body:", req.body);
+
   const { amount, customerName, email, description, paymentType } = req.body;
 
   if (!amount || !customerName || !email || !paymentType) {
