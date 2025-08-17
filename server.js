@@ -3,6 +3,7 @@ import express from "express";
 import cors from "cors";
 import fetch from "node-fetch";
 import { Buffer } from "buffer";
+import 'dotenv/config'; // Loads variables from .env
 
 const app = express();
 const PORT = process.env.PORT || 8000;
@@ -10,15 +11,24 @@ const PORT = process.env.PORT || 8000;
 app.use(cors());
 app.use(express.json());
 
-const PAYMONGO_SECRET_KEY = "sk_test_4D5ef3VqrdryX5hbSCJUYG3K";
+// ✅ Use environment variable for secret key
+const PAYMONGO_SECRET_KEY = process.env.PAYMONGO_SECRET_KEY;
 
 // Helper to encode secret key for Basic Auth
 const getAuthHeader = () => {
+  if (!PAYMONGO_SECRET_KEY) {
+    console.error("⚠️ PAYMONGO_SECRET_KEY not set in .env");
+    return "";
+  }
   return `Basic ${Buffer.from(PAYMONGO_SECRET_KEY + ":").toString("base64")}`;
 };
 
 app.post("/createPaymongoCheckout", async (req, res) => {
   const { amount, customerName, email, description } = req.body;
+
+  if (!amount || !customerName || !email) {
+    return res.status(400).json({ error: "Missing required fields" });
+  }
 
   try {
     // 1️⃣ Create Payment Intent
@@ -56,11 +66,8 @@ app.post("/createPaymongoCheckout", async (req, res) => {
       body: JSON.stringify({
         data: {
           attributes: {
-            type: "gcash", // could be paymaya, qrph, etc.
-            billing: {
-              name: customerName,
-              email: email,
-            },
+            type: "gcash", // Could be "paymaya", "qrph" etc.
+            billing: { name: customerName, email: email },
           },
         },
       }),
@@ -80,9 +87,7 @@ app.post("/createPaymongoCheckout", async (req, res) => {
           "Content-Type": "application/json",
           "Authorization": getAuthHeader(),
         },
-        body: JSON.stringify({
-          data: { attributes: { payment_method: paymentMethodId } },
-        }),
+        body: JSON.stringify({ data: { attributes: { payment_method: paymentMethodId } } }),
       }
     );
 
@@ -95,8 +100,9 @@ app.post("/createPaymongoCheckout", async (req, res) => {
       paymentMethod: methodData.data,
       attach: attachData.data,
     });
+
   } catch (err) {
-    console.error(err);
+    console.error("Server Error:", err);
     res.status(500).json({ error: "Something went wrong" });
   }
 });
