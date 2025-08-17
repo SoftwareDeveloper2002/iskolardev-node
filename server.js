@@ -3,7 +3,7 @@ import express from "express";
 import cors from "cors";
 import fetch from "node-fetch";
 import { Buffer } from "buffer";
-import 'dotenv/config'; // Loads variables from .env
+import 'dotenv/config';
 
 const app = express();
 const PORT = process.env.PORT || 8000;
@@ -11,10 +11,8 @@ const PORT = process.env.PORT || 8000;
 app.use(cors());
 app.use(express.json());
 
-// ✅ Use environment variable for secret key
 const PAYMONGO_SECRET_KEY = process.env.PAYMONGO_SECRET_KEY;
 
-// Helper to encode secret key for Basic Auth
 const getAuthHeader = () => {
   if (!PAYMONGO_SECRET_KEY) {
     console.error("⚠️ PAYMONGO_SECRET_KEY not set in .env");
@@ -31,6 +29,9 @@ app.post("/createPaymongoCheckout", async (req, res) => {
   }
 
   try {
+    // Convert amount to centavos
+    const amountInCentavos = Math.round(amount * 100);
+
     // 1️⃣ Create Payment Intent
     const intentResponse = await fetch("https://api.paymongo.com/v1/payment_intents", {
       method: "POST",
@@ -41,11 +42,15 @@ app.post("/createPaymongoCheckout", async (req, res) => {
       body: JSON.stringify({
         data: {
           attributes: {
-            amount: Math.round(amount * 100),
+            amount: amountInCentavos,
             currency: "PHP",
-            payment_method_allowed: [paymentType], // use selected type
-            payment_method_options: { card: { request_three_d_secure: "any" } },
+            payment_method_allowed: [paymentType],
+            capture_type: "automatic",
             description: description || "Project Payment",
+            // Only include card options if paymentType is card
+            ...(paymentType === "card" && {
+              payment_method_options: { card: { request_three_d_secure: "any" } }
+            }),
           },
         },
       }),
