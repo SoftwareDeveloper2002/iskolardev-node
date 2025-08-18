@@ -6,7 +6,6 @@ import "dotenv/config";
 import admin from "firebase-admin";
 
 /* ------------------ FIREBASE INIT ------------------ */
-var admin = require("firebase-admin");
 
 var serviceAccount = require("fb.json");
 
