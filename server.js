@@ -1,12 +1,15 @@
-// server.js
 import express from "express";
 import cors from "cors";
 import fetch from "node-fetch";
 import "dotenv/config";
 import admin from "firebase-admin";
-import serviceAccount from "./fb.json" assert { type: "json" }; // ✅ ESM JSON import
+import fs from "fs";
 
 /* ------------------ FIREBASE INIT ------------------ */
+// ✅ Ensure Firebase Admin SDK is initialized
+// ✅ Load fb.json manually instead of assert
+const serviceAccount = JSON.parse(fs.readFileSync("./fb.json", "utf8"));
+
 if (!admin.apps.length) {
   admin.initializeApp({
     credential: admin.credential.cert(serviceAccount),
