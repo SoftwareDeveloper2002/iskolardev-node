@@ -2,12 +2,26 @@
 import express from "express";
 import cors from "cors";
 import fetch from "node-fetch";
-import 'dotenv/config';
+import "dotenv/config";
 
+import admin from "firebase-admin";
+import serviceAccount from "./iskolardev-a1383-firebase-adminsdk-fbsvc-9dac30e30c.json" assert { type: "json" }; 
+// 👆 Download this JSON from Firebase Console → Project Settings → Service accounts
+
+/* ------------------ FIREBASE INIT ------------------ */
+if (!admin.apps.length) {
+  admin.initializeApp({
+    credential: admin.credential.cert(serviceAccount),
+  });
+}
+const db = admin.firestore();
+
+/* ------------------ EXPRESS INIT ------------------ */
 const app = express();
 app.use(cors({ origin: true }));
 app.use(express.json());
 
+/* ------------------ PAYMONGO CONFIG ------------------ */
 const PAYMONGO_SECRET_KEY = process.env.PAYMONGO_SECRET_KEY;
 if (!PAYMONGO_SECRET_KEY) {
   console.error("❌ Missing PAYMONGO_SECRET_KEY in .env");
@@ -15,17 +29,19 @@ if (!PAYMONGO_SECRET_KEY) {
 }
 
 const authHeader = {
-  Authorization: "Basic " + Buffer.from(PAYMONGO_SECRET_KEY + ":").toString("base64"),
+  Authorization:
+    "Basic " + Buffer.from(PAYMONGO_SECRET_KEY + ":").toString("base64"),
   "Content-Type": "application/json",
 };
 
-// Helper: PayMongo POST
+/* ------------------ HELPERS ------------------ */
 async function pmPost(url, body) {
   const res = await fetch(url, {
     method: "POST",
     headers: authHeader,
     body: JSON.stringify(body),
   });
+
   const data = await res.json();
   if (!res.ok) {
     const msg = data?.errors?.[0]?.detail || JSON.stringify(data);
@@ -34,13 +50,10 @@ async function pmPost(url, body) {
   return data;
 }
 
+/* ------------------ ROUTES ------------------ */
+
 /**
- * Create PayMongo GCash Payment Intent and return checkout URL
- * Body:
- * {
- *   "amount": 100.00,           // PHP
- *   "billing": { name, email, phone }  // optional, but recommended
- * }
+ * Create GCash Source (checkout link)
  */
 app.post("/paymongo/gcash/intent", async (req, res) => {
   try {
@@ -51,11 +64,17 @@ app.post("/paymongo/gcash/intent", async (req, res) => {
 
     const amountCentavos = Math.round(Number(amount) * 100);
 
-    // 1) Create Payment Method (gcash)
-    const pm = await pmPost("https://api.paymongo.com/v1/payment_methods", {
+    // ✅ Step 1: Create a GCash Source
+    const source = await pmPost("https://api.paymongo.com/v1/sources", {
       data: {
         attributes: {
+          amount: amountCentavos,
+          redirect: {
+            success: "https://iskolardev.online/payment-success",
+            failed: "https://iskolardev.online/payment-failed",
+          },
           type: "gcash",
+          currency: "PHP",
           billing: {
             name: billing?.name || "GCash Payer",
             email: billing?.email || "payer@example.com",
@@ -64,55 +83,83 @@ app.post("/paymongo/gcash/intent", async (req, res) => {
         },
       },
     });
-    const paymentMethodId = pm?.data?.id;
 
-    // 2) Create Payment Intent
-    const pi = await pmPost("https://api.paymongo.com/v1/payment_intents", {
-      data: {
-        attributes: {
-          amount: amountCentavos,
-          payment_method_allowed: ["gcash"],
-          payment_method_options: { gcash: { version: "v1" } },
-          currency: "PHP",
-          capture_type: "automatic",
-          description: "Downpayment via GCash",
-        },
-      },
-    });
-    const intentId = pi?.data?.id;
+    const checkoutUrl = source?.data?.attributes?.redirect?.checkout_url;
+    const sourceId = source?.data?.id;
 
-    // 3) Attach Payment Method to Payment Intent
-    const attach = await pmPost(
-      `https://api.paymongo.com/v1/payment_intents/${intentId}/attach`,
-      {
-        data: {
-          attributes: {
-            payment_method: paymentMethodId,
-            return_url: "https://iskolardev.online/StudentCreateProject"  // if you want redirect back
-          },
-        },
-      }
-    );
-
-    const checkoutUrl = attach?.data?.attributes?.next_action?.redirect?.url;
     if (!checkoutUrl) {
-      return res.status(500).json({ error: "Failed to create GCash checkout URL" });
+      return res
+        .status(500)
+        .json({ error: "Failed to create GCash checkout URL" });
     }
 
-    res.json({ checkoutUrl, intentId });
+    // ✅ Save initial pending payment in Firestore
+    await db.collection("payments").doc(sourceId).set({
+      amount: amount,
+      billing,
+      sourceId,
+      status: "pending",
+      createdAt: admin.firestore.FieldValue.serverTimestamp(),
+    });
+
+    res.json({
+      checkoutUrl,
+      sourceId,
+    });
   } catch (err) {
-    console.error(err);
+    console.error("❌ Error in /paymongo/gcash/intent:", err.message);
     res.status(500).json({ error: err.message || "Server error" });
   }
 });
 
-// (Optional) Webhook endpoint skeleton
-app.post("/paymongo/webhook", express.json({ type: "*/*" }), async (req, res) => {
-  // TODO: verify signature (x-paymongo-signature) if you enable webhook signing
-  // Handle events like payment.paid, payment.failed, etc.
-  console.log("Webhook received:", JSON.stringify(req.body, null, 2));
-  res.sendStatus(200);
-});
+/**
+ * Webhook endpoint for PayMongo events
+ */
+app.post(
+  "/paymongo/webhook",
+  express.json({ type: "*/*" }),
+  async (req, res) => {
+    try {
+      console.log("🔔 Webhook received:", JSON.stringify(req.body, null, 2));
 
+      const event = req.body?.data?.attributes?.type;
+      const paymentId = req.body?.data?.id;
+
+      if (event === "payment.paid") {
+        console.log(`✅ Payment successful: ${paymentId}`);
+
+        // 👉 Update Firestore payment record
+        await db.collection("payments").doc(paymentId).set(
+          {
+            status: "paid",
+            paidAt: admin.firestore.FieldValue.serverTimestamp(),
+          },
+          { merge: true }
+        );
+      }
+
+      if (event === "payment.failed") {
+        console.log(`❌ Payment failed: ${paymentId}`);
+
+        await db.collection("payments").doc(paymentId).set(
+          {
+            status: "failed",
+            failedAt: admin.firestore.FieldValue.serverTimestamp(),
+          },
+          { merge: true }
+        );
+      }
+
+      res.sendStatus(200);
+    } catch (err) {
+      console.error("Webhook error:", err.message);
+      res.sendStatus(500);
+    }
+  }
+);
+
+/* ------------------ SERVER ------------------ */
 const PORT = process.env.PORT || 8000;
-app.listen(PORT, () => console.log(`✅ Server running on http://localhost:${PORT}`));
+app.listen(PORT, () =>
+  console.log(`✅ Server running on http://localhost:${PORT}`)
+);
