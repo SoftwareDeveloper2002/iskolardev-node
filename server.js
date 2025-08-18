@@ -22,16 +22,16 @@ const getAuthHeader = () => {
 };
 
 app.post("/createPaymongoCheckout", async (req, res) => {
-    console.log("Received request body:", req.body);
+  console.log("Received request body:", req.body);
 
   const { amount, customerName, email, description, paymentType } = req.body;
 
-  if (!amount || !customerName || !email || !paymentType) {
-    return res.status(400).json({ error: "Missing required fieldsassasd" });
+  // Validate fields
+  if (typeof amount !== "number" || !customerName || !email || !paymentType) {
+    return res.status(400).json({ error: "Missing or invalid required fields" });
   }
 
   try {
-    // Convert amount to centavos
     const amountInCentavos = Math.round(amount * 100);
 
     // 1️⃣ Create Payment Intent
@@ -49,7 +49,6 @@ app.post("/createPaymongoCheckout", async (req, res) => {
             payment_method_allowed: [paymentType],
             capture_type: "automatic",
             description: description || "Project Payment",
-            // Only include card options if paymentType is card
             ...(paymentType === "card" && {
               payment_method_options: { card: { request_three_d_secure: "any" } }
             }),
@@ -59,6 +58,8 @@ app.post("/createPaymongoCheckout", async (req, res) => {
     });
 
     const intentData = await intentResponse.json();
+    console.log("Payment Intent Response:", intentData);
+
     if (!intentResponse.ok) return res.status(intentResponse.status).json(intentData);
 
     const paymentIntentId = intentData.data.id;
@@ -81,6 +82,8 @@ app.post("/createPaymongoCheckout", async (req, res) => {
     });
 
     const methodData = await methodResponse.json();
+    console.log("Payment Method Response:", methodData);
+
     if (!methodResponse.ok) return res.status(methodResponse.status).json(methodData);
 
     const paymentMethodId = methodData.data.id;
@@ -99,6 +102,8 @@ app.post("/createPaymongoCheckout", async (req, res) => {
     );
 
     const attachData = await attachResponse.json();
+    console.log("Attach Response:", attachData);
+
     if (!attachResponse.ok) return res.status(attachResponse.status).json(attachData);
 
     // 4️⃣ Return checkout info
@@ -110,7 +115,7 @@ app.post("/createPaymongoCheckout", async (req, res) => {
 
   } catch (err) {
     console.error("Server Error:", err);
-    res.status(500).json({ error: "Something went wrong" });
+    res.status(500).json({ error: "Something went wrong", details: err.message });
   }
 });
 
