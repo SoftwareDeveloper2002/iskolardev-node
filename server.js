@@ -5,13 +5,15 @@ import fetch from "node-fetch";
 import "dotenv/config";
 
 import admin from "firebase-admin";
-import serviceAccount from "./iskolardev-a1383-firebase-adminsdk-fbsvc-9dac30e30c.json" assert { type: "json" }; 
-// 👆 Download this JSON from Firebase Console → Project Settings → Service accounts
 
 /* ------------------ FIREBASE INIT ------------------ */
 if (!admin.apps.length) {
   admin.initializeApp({
-    credential: admin.credential.cert(serviceAccount),
+    credential: admin.credential.cert({
+      projectId: process.env.FIREBASE_PROJECT_ID,
+      clientEmail: process.env.FIREBASE_CLIENT_EMAIL,
+      privateKey: process.env.FIREBASE_PRIVATE_KEY?.replace(/\\n/g, "\n"),
+    }),
   });
 }
 const db = admin.firestore();
