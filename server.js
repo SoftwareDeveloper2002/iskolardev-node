@@ -2,131 +2,117 @@
 import express from "express";
 import cors from "cors";
 import fetch from "node-fetch";
-import { Buffer } from "buffer";
 import 'dotenv/config';
 
 const app = express();
-const PORT = process.env.PORT || 8000;
-
-app.use(cors());
+app.use(cors({ origin: true }));
 app.use(express.json());
 
-const PAYMONGO_SECRET_KEY = 'sk_test_4D5ef3VqrdryX5hbSCJUYG3K';
+const PAYMONGO_SECRET_KEY = process.env.PAYMONGO_SECRET_KEY;
+if (!PAYMONGO_SECRET_KEY) {
+  console.error("❌ Missing PAYMONGO_SECRET_KEY in .env");
+  process.exit(1);
+}
 
-const getAuthHeader = () => {
-  if (!PAYMONGO_SECRET_KEY) {
-    console.error("⚠️ PAYMONGO_SECRET_KEY not set in .env");
-    return "";
-  }
-  return `Basic ${Buffer.from(PAYMONGO_SECRET_KEY + ":").toString("base64")}`;
+const authHeader = {
+  Authorization: "Basic " + Buffer.from(PAYMONGO_SECRET_KEY + ":").toString("base64"),
+  "Content-Type": "application/json",
 };
 
-app.post("/createPaymongoCheckout", async (req, res) => {
-  console.log("Received request body:", req.body);
-
-  const { amount, customerName, email, description, paymentType } = req.body;
-
-  // Validate fields
-  if (typeof amount !== "number" || !customerName || !email || !paymentType) {
-    return res.status(400).json({ error: "Missing or invalid required fields" });
+// Helper: PayMongo POST
+async function pmPost(url, body) {
+  const res = await fetch(url, {
+    method: "POST",
+    headers: authHeader,
+    body: JSON.stringify(body),
+  });
+  const data = await res.json();
+  if (!res.ok) {
+    const msg = data?.errors?.[0]?.detail || JSON.stringify(data);
+    throw new Error(`PayMongo error: ${msg}`);
   }
+  return data;
+}
 
+/**
+ * Create PayMongo GCash Payment Intent and return checkout URL
+ * Body:
+ * {
+ *   "amount": 100.00,           // PHP
+ *   "billing": { name, email, phone }  // optional, but recommended
+ * }
+ */
+app.post("/paymongo/gcash/intent", async (req, res) => {
   try {
-    const amountInCentavos = Math.round(amount * 100);
+    const { amount, billing } = req.body || {};
+    if (!amount || isNaN(amount)) {
+      return res.status(400).json({ error: "Invalid amount" });
+    }
 
-    // 1️⃣ Create Payment Intent (nested format for PayMongo)
-    const intentBody = {
+    const amountCentavos = Math.round(Number(amount) * 100);
+
+    // 1) Create Payment Method (gcash)
+    const pm = await pmPost("https://api.paymongo.com/v1/payment_methods", {
       data: {
         attributes: {
-          amount: amountInCentavos,
+          type: "gcash",
+          billing: {
+            name: billing?.name || "GCash Payer",
+            email: billing?.email || "payer@example.com",
+            phone: billing?.phone || "09123456789",
+          },
+        },
+      },
+    });
+    const paymentMethodId = pm?.data?.id;
+
+    // 2) Create Payment Intent
+    const pi = await pmPost("https://api.paymongo.com/v1/payment_intents", {
+      data: {
+        attributes: {
+          amount: amountCentavos,
+          payment_method_allowed: ["gcash"],
+          payment_method_options: { gcash: { version: "v1" } },
           currency: "PHP",
-          payment_method_allowed: [paymentType],
           capture_type: "automatic",
-          description: description || "Project Payment",
-          statement_descriptor: "ISKOLARDEV",
-          ...(paymentType === "card" && {
-            payment_method_options: { card: { request_three_d_secure: "any" } }
-          }),
+          description: "Downpayment via GCash",
         },
       },
-    };
-
-    const intentResponse = await fetch("https://api.paymongo.com/v1/payment_intents", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "Authorization": getAuthHeader(),
-      },
-      body: JSON.stringify(intentBody),
     });
+    const intentId = pi?.data?.id;
 
-    const intentData = await intentResponse.json();
-    console.log("Payment Intent Response:", intentData);
-    if (!intentResponse.ok) return res.status(intentResponse.status).json(intentData);
-
-    const paymentIntentId = intentData.data.id;
-
-    // 2️⃣ Create Payment Method
-    const methodBody = {
-      data: {
-        attributes: {
-          type: paymentType,
-          billing: { name: customerName, email: email },
-        },
-      },
-    };
-
-    const methodResponse = await fetch("https://api.paymongo.com/v1/payment_methods", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "Authorization": getAuthHeader(),
-      },
-      body: JSON.stringify(methodBody),
-    });
-
-    const methodData = await methodResponse.json();
-    console.log("Payment Method Response:", methodData);
-    if (!methodResponse.ok) return res.status(methodResponse.status).json(methodData);
-
-    const paymentMethodId = methodData.data.id;
-
-    // 3️⃣ Attach Payment Method to Payment Intent
-    const attachBody = {
-      data: {
-        attributes: { payment_method: paymentMethodId }
-      }
-    };
-
-    const attachResponse = await fetch(
-      `https://api.paymongo.com/v1/payment_intents/${paymentIntentId}/attach`,
+    // 3) Attach Payment Method to Payment Intent
+    const attach = await pmPost(
+      `https://api.paymongo.com/v1/payment_intents/${intentId}/attach`,
       {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "Authorization": getAuthHeader(),
+        data: {
+          attributes: {
+            payment_method: paymentMethodId,
+            // optional: return_url: "https://yourapp.com/return"  // if you want redirect back
+          },
         },
-        body: JSON.stringify(attachBody),
       }
     );
 
-    const attachData = await attachResponse.json();
-    console.log("Attach Response:", attachData);
-    if (!attachResponse.ok) return res.status(attachResponse.status).json(attachData);
+    const checkoutUrl = attach?.data?.attributes?.next_action?.redirect?.url;
+    if (!checkoutUrl) {
+      return res.status(500).json({ error: "Failed to create GCash checkout URL" });
+    }
 
-    // 4️⃣ Return checkout info
-    res.json({
-      paymentIntent: intentData.data,
-      paymentMethod: methodData.data,
-      attach: attachData.data,
-    });
-
+    res.json({ checkoutUrl, intentId });
   } catch (err) {
-    console.error("Server Error:", err);
-    res.status(500).json({ error: "Something went wrong", details: err.message });
+    console.error(err);
+    res.status(500).json({ error: err.message || "Server error" });
   }
 });
 
-app.listen(PORT, () => {
-  console.log(`Server running on port ${PORT}`);
+// (Optional) Webhook endpoint skeleton
+app.post("/paymongo/webhook", express.json({ type: "*/*" }), async (req, res) => {
+  // TODO: verify signature (x-paymongo-signature) if you enable webhook signing
+  // Handle events like payment.paid, payment.failed, etc.
+  console.log("Webhook received:", JSON.stringify(req.body, null, 2));
+  res.sendStatus(200);
 });
+
+const PORT = process.env.PORT || 8000;
+app.listen(PORT, () => console.log(`✅ Server running on http://localhost:${PORT}`));
