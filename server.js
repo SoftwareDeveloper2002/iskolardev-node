@@ -6,12 +6,17 @@ import "dotenv/config";
 import admin from "firebase-admin";
 
 /* ------------------ FIREBASE INIT ------------------ */
+import serviceAccount from "./fb.json" assert { type: "json" }; 
+// 👆 Make sure fb.json is in root and added to .gitignore
 
-var serviceAccount = require("fb.json");
+if (!admin.apps.length) {
+  admin.initializeApp({
+    credential: admin.credential.cert(serviceAccount),
+  });
+}
 
-admin.initializeApp({
-  credential: admin.credential.cert(serviceAccount)
-});
+// ✅ Firestore reference
+const db = admin.firestore();
 
 /* ------------------ EXPRESS INIT ------------------ */
 const app = express();
@@ -42,7 +47,7 @@ async function pmPost(url, body) {
   const data = await res.json();
 
   if (!res.ok) {
-    console.error("❌ PayMongo error response:", data); // 👈 log full response
+    console.error("❌ PayMongo error response:", data);
     const msg = data?.errors?.[0]?.detail || JSON.stringify(data);
     throw new Error(`PayMongo error: ${msg}`);
   }
