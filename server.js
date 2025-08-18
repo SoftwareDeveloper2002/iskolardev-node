@@ -1,23 +1,11 @@
+// server.js
 import express from "express";
 import cors from "cors";
 import fetch from "node-fetch";
 import "dotenv/config";
-import admin from "firebase-admin";
-import fs from "fs";
 
-/* ------------------ FIREBASE INIT ------------------ */
-// ✅ Ensure Firebase Admin SDK is initialized
-// ✅ Load fb.json manually instead of assert
-const serviceAccount = JSON.parse(fs.readFileSync("./fb.json", "utf8"));
-
-if (!admin.apps.length) {
-  admin.initializeApp({
-    credential: admin.credential.cert(serviceAccount),
-  });
-}
-
-// ✅ Firestore reference
-const db = admin.firestore();
+// ✅ Import firebase config
+import { admin, db } from "./firebase.js";
 
 /* ------------------ EXPRESS INIT ------------------ */
 const app = express();
@@ -74,7 +62,6 @@ app.post("/paymongo/gcash/intent", async (req, res) => {
 
     const amountCentavos = Math.round(Number(amount) * 100);
 
-    // ✅ Step 1: Create a GCash Source
     const source = await pmPost("https://api.paymongo.com/v1/sources", {
       data: {
         attributes: {
@@ -98,12 +85,9 @@ app.post("/paymongo/gcash/intent", async (req, res) => {
     const sourceId = source?.data?.id;
 
     if (!checkoutUrl) {
-      return res
-        .status(500)
-        .json({ error: "Failed to create GCash checkout URL" });
+      return res.status(500).json({ error: "Failed to create GCash checkout URL" });
     }
 
-    // ✅ Save pending payment in Firestore
     await db.collection("payments").doc(sourceId).set({
       amount,
       billing,
@@ -119,51 +103,41 @@ app.post("/paymongo/gcash/intent", async (req, res) => {
   }
 });
 
-/**
- * Webhook endpoint for PayMongo events
- */
-app.post(
-  "/paymongo/webhook",
-  express.json({ type: "*/*" }),
-  async (req, res) => {
-    try {
-      console.log("🔔 Webhook received:", JSON.stringify(req.body, null, 2));
+app.post("/paymongo/webhook", express.json({ type: "*/*" }), async (req, res) => {
+  try {
+    console.log("🔔 Webhook received:", JSON.stringify(req.body, null, 2));
 
-      const event = req.body?.data?.attributes?.type;
-      const paymentId = req.body?.data?.id;
+    const event = req.body?.data?.attributes?.type;
+    const paymentId = req.body?.data?.id;
 
-      if (!event || !paymentId) {
-        console.warn("⚠️ Invalid webhook payload");
-        return res.sendStatus(400);
-      }
-
-      let update = {};
-      if (event === "payment.paid") {
-        update = {
-          status: "paid",
-          paidAt: admin.firestore.FieldValue.serverTimestamp(),
-        };
-      } else if (event === "payment.failed") {
-        update = {
-          status: "failed",
-          failedAt: admin.firestore.FieldValue.serverTimestamp(),
-        };
-      }
-
-      if (Object.keys(update).length) {
-        await db
-          .collection("payments")
-          .doc(paymentId)
-          .set(update, { merge: true });
-      }
-
-      res.sendStatus(200);
-    } catch (err) {
-      console.error("Webhook error:", err);
-      res.sendStatus(500);
+    if (!event || !paymentId) {
+      console.warn("⚠️ Invalid webhook payload");
+      return res.sendStatus(400);
     }
+
+    let update = {};
+    if (event === "payment.paid") {
+      update = {
+        status: "paid",
+        paidAt: admin.firestore.FieldValue.serverTimestamp(),
+      };
+    } else if (event === "payment.failed") {
+      update = {
+        status: "failed",
+        failedAt: admin.firestore.FieldValue.serverTimestamp(),
+      };
+    }
+
+    if (Object.keys(update).length) {
+      await db.collection("payments").doc(paymentId).set(update, { merge: true });
+    }
+
+    res.sendStatus(200);
+  } catch (err) {
+    console.error("Webhook error:", err);
+    res.sendStatus(500);
   }
-);
+});
 
 /* ------------------ SERVER ------------------ */
 const PORT = process.env.PORT || 8000;
