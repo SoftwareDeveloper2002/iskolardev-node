@@ -6,8 +6,9 @@ import "dotenv/config";
 import admin from "firebase-admin";
 
 /* ------------------ FIREBASE INIT ------------------ */
-import serviceAccount from "./fb.json" assert { type: "json" }; 
+
 // 👆 Make sure fb.json is in root and added to .gitignore
+var serviceAccount = require("fb.json");
 
 if (!admin.apps.length) {
   admin.initializeApp({
