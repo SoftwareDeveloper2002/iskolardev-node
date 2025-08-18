@@ -11,7 +11,7 @@ const PORT = process.env.PORT || 8000;
 app.use(cors());
 app.use(express.json());
 
-const PAYMONGO_SECRET_KEY = process.env.PAYMONGO_SECRET_KEY;
+const PAYMONGO_SECRET_KEY = 'sk_test_4D5ef3VqrdryX5hbSCJUYG3K';
 
 const getAuthHeader = () => {
   if (!PAYMONGO_SECRET_KEY) {
@@ -34,61 +34,70 @@ app.post("/createPaymongoCheckout", async (req, res) => {
   try {
     const amountInCentavos = Math.round(amount * 100);
 
-    // 1️⃣ Create Payment Intent
+    // 1️⃣ Create Payment Intent (nested format for PayMongo)
+    const intentBody = {
+      data: {
+        attributes: {
+          amount: amountInCentavos,
+          currency: "PHP",
+          payment_method_allowed: [paymentType],
+          capture_type: "automatic",
+          description: description || "Project Payment",
+          statement_descriptor: "ISKOLARDEV",
+          ...(paymentType === "card" && {
+            payment_method_options: { card: { request_three_d_secure: "any" } }
+          }),
+        },
+      },
+    };
+
     const intentResponse = await fetch("https://api.paymongo.com/v1/payment_intents", {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
         "Authorization": getAuthHeader(),
       },
-      body: JSON.stringify({
-        data: {
-          attributes: {
-            amount: amountInCentavos,
-            currency: "PHP",
-            payment_method_allowed: [paymentType],
-            capture_type: "automatic",
-            description: description || "Project Payment",
-            ...(paymentType === "card" && {
-              payment_method_options: { card: { request_three_d_secure: "any" } }
-            }),
-          },
-        },
-      }),
+      body: JSON.stringify(intentBody),
     });
 
     const intentData = await intentResponse.json();
     console.log("Payment Intent Response:", intentData);
-
     if (!intentResponse.ok) return res.status(intentResponse.status).json(intentData);
 
     const paymentIntentId = intentData.data.id;
 
     // 2️⃣ Create Payment Method
+    const methodBody = {
+      data: {
+        attributes: {
+          type: paymentType,
+          billing: { name: customerName, email: email },
+        },
+      },
+    };
+
     const methodResponse = await fetch("https://api.paymongo.com/v1/payment_methods", {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
         "Authorization": getAuthHeader(),
       },
-      body: JSON.stringify({
-        data: {
-          attributes: {
-            type: paymentType,
-            billing: { name: customerName, email: email },
-          },
-        },
-      }),
+      body: JSON.stringify(methodBody),
     });
 
     const methodData = await methodResponse.json();
     console.log("Payment Method Response:", methodData);
-
     if (!methodResponse.ok) return res.status(methodResponse.status).json(methodData);
 
     const paymentMethodId = methodData.data.id;
 
     // 3️⃣ Attach Payment Method to Payment Intent
+    const attachBody = {
+      data: {
+        attributes: { payment_method: paymentMethodId }
+      }
+    };
+
     const attachResponse = await fetch(
       `https://api.paymongo.com/v1/payment_intents/${paymentIntentId}/attach`,
       {
@@ -97,13 +106,12 @@ app.post("/createPaymongoCheckout", async (req, res) => {
           "Content-Type": "application/json",
           "Authorization": getAuthHeader(),
         },
-        body: JSON.stringify({ data: { attributes: { payment_method: paymentMethodId } } }),
+        body: JSON.stringify(attachBody),
       }
     );
 
     const attachData = await attachResponse.json();
     console.log("Attach Response:", attachData);
-
     if (!attachResponse.ok) return res.status(attachResponse.status).json(attachData);
 
     // 4️⃣ Return checkout info
