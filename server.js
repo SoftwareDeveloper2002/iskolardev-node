@@ -88,7 +88,7 @@ app.post("/paymongo/gcash/intent", async (req, res) => {
         data: {
           attributes: {
             payment_method: paymentMethodId,
-            // optional: return_url: "https://yourapp.com/return"  // if you want redirect back
+            return_url: "https://iskolardev.online/StudentCreateProject"  // if you want redirect back
           },
         },
       }
