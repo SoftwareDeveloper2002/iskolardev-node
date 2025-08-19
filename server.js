@@ -1,146 +1,51 @@
 // server.js
 import express from "express";
 import cors from "cors";
-import fetch from "node-fetch";
 import "dotenv/config";
-
-// ✅ Import firebase config
-import { admin, db } from "./firebase.js";
-
+import { db, admin } from "./firebase_admin.js"; 
+import paymentRoutes from "./payment_routes.js";
+import loginRoute from "./routes/login.js";
+import verifyRoutes from "./routes/verify.js";
 /* ------------------ EXPRESS INIT ------------------ */
 const app = express();
 app.use(cors({ origin: true }));
 app.use(express.json());
 
-/* ------------------ PAYMONGO CONFIG ------------------ */
-const PAYMONGO_SECRET_KEY = process.env.PAYMONGO_SECRET_KEY;
-if (!PAYMONGO_SECRET_KEY) {
-  console.error("❌ Missing PAYMONGO_SECRET_KEY in .env");
-  process.exit(1);
-}
+/* ------------------ MAINTENANCE MODE ------------------ */
+const maintenanceMode = process.env.MAINTENANCE_MODE === "true";
 
-const authHeader = {
-  Authorization:
-    "Basic " + Buffer.from(PAYMONGO_SECRET_KEY + ":").toString("base64"),
-  "Content-Type": "application/json",
-};
-
-/* ------------------ HELPERS ------------------ */
-async function pmPost(url, body) {
-  const res = await fetch(url, {
-    method: "POST",
-    headers: authHeader,
-    body: JSON.stringify(body),
-  });
-
-  const data = await res.json();
-
-  if (!res.ok) {
-    console.error("❌ PayMongo error response:", data);
-    const msg = data?.errors?.[0]?.detail || JSON.stringify(data);
-    throw new Error(`PayMongo error: ${msg}`);
+app.use((req, res, next) => {
+  if (maintenanceMode) {
+    return res.status(503).json({
+      status: "maintenance",
+      message: "🚧 The system is currently under maintenance. Please try again later.",
+      timestamp: new Date().toISOString(),
+    });
   }
-  return data;
-}
+  next();
+});
 
 /* ------------------ ROUTES ------------------ */
-app.get("/", (req, res) => {
-  res.json({
-    status: "success ✅",
-    message: "TESTING MO NA NGANI!",
-    env: process.env.NODE_ENV || "development",
-    timestamp: new Date().toISOString(),
-  });
-});
-
-app.post("/paymongo/gcash/intent", async (req, res) => {
+app.get('/', (req, res) => res.send('There is nothing to see here.'));
+// Test Firestore
+app.get("/test-firestore", async (req, res) => {
   try {
-    const { amount, billing } = req.body || {};
-    if (!amount || isNaN(amount)) {
-      return res.status(400).json({ error: "Invalid amount" });
-    }
-
-    const amountCentavos = Math.round(Number(amount) * 100);
-
-    const source = await pmPost("https://api.paymongo.com/v1/sources", {
-      data: {
-        attributes: {
-          amount: amountCentavos,
-          redirect: {
-            success: "https://iskolardev.online/payment-success",
-            failed: "https://iskolardev.online/payment-failed",
-          },
-          type: "gcash",
-          currency: "PHP",
-          billing: {
-            name: billing?.name || "GCash Payer",
-            email: billing?.email || "payer@example.com",
-            phone: billing?.phone || "09123456789",
-          },
-        },
-      },
+    await db.collection("test").doc("demo").set({
+      timestamp: admin.firestore.FieldValue.serverTimestamp(),
     });
-
-    const checkoutUrl = source?.data?.attributes?.redirect?.checkout_url;
-    const sourceId = source?.data?.id;
-
-    if (!checkoutUrl) {
-      return res.status(500).json({ error: "Failed to create GCash checkout URL" });
-    }
-
-    await db.collection("payments").doc(sourceId).set({
-      amount,
-      billing,
-      sourceId,
-      status: "pending",
-      createdAt: admin.firestore.FieldValue.serverTimestamp(),
-    });
-
-    res.json({ checkoutUrl, sourceId });
+    res.json({ status: "success ✅ Firestore write worked" });
   } catch (err) {
-    console.error("❌ Error in /paymongo/gcash/intent:", err);
-    res.status(500).json({ error: err.message || "Server error" });
+    console.error("Firestore auth failed:", err);
+    res.status(500).json({ error: err.message });
   }
 });
 
-app.post("/paymongo/webhook", express.json({ type: "*/*" }), async (req, res) => {
-  try {
-    console.log("🔔 Webhook received:", JSON.stringify(req.body, null, 2));
-
-    const event = req.body?.data?.attributes?.type;
-    const paymentId = req.body?.data?.id;
-
-    if (!event || !paymentId) {
-      console.warn("⚠️ Invalid webhook payload");
-      return res.sendStatus(400);
-    }
-
-    let update = {};
-    if (event === "payment.paid") {
-      update = {
-        status: "paid",
-        paidAt: admin.firestore.FieldValue.serverTimestamp(),
-      };
-    } else if (event === "payment.failed") {
-      update = {
-        status: "failed",
-        failedAt: admin.firestore.FieldValue.serverTimestamp(),
-      };
-    }
-
-    if (Object.keys(update).length) {
-      await db.collection("payments").doc(paymentId).set(update, { merge: true });
-    }
-
-    res.sendStatus(200);
-  } catch (err) {
-    console.error("Webhook error:", err);
-    res.sendStatus(500);
-  }
-});
-
+/* ------------------ PAYMENT ROUTES ------------------ */
+app.use("/paymongo", paymentRoutes);
+app.use("/auth/login", loginRoute);
+app.use("/auth/verify", verifyRoutes);
 /* ------------------ SERVER ------------------ */
 const PORT = process.env.PORT || 8000;
 app.listen(PORT, () =>
-  console.log(`✅ Server running on http://localhost:${PORT}`)
+  console.log(`✅ Server running on http://localhost:${PORT} | Maintenance Mode: ${maintenanceMode}`)
 );
