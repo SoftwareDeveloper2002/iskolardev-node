@@ -1,13 +1,12 @@
 // payment_routes.js
 import express from "express";
 import fetch from "node-fetch";
-import { db, admin } from "./firebase_admin.js"; // <-- Firebase Admin SDK
+import { db, admin } from "./firebase_admin.js"; // Firebase Admin SDK
 
 const router = express.Router();
 
 /* ------------------ PAYMONGO CONFIG ------------------ */
-// Hardcoded secret key
-const PAYMONGO_SECRET_KEY = "sk_test_uYAyatPB8sNrDkLispMVrLh4";
+const PAYMONGO_SECRET_KEY = process.env.PAYMONGO_SECRET_KEY || "sk_test_uYAyatPB8sNrDkLispMVrLh4";
 
 const authHeader = {
   Authorization: "Basic " + Buffer.from(PAYMONGO_SECRET_KEY + ":").toString("base64"),
@@ -36,7 +35,7 @@ async function pmPost(url, body) {
 
 /**
  * @route POST /paymongo/:type/intent
- * @desc Create payment intent for GCash, GrabPay, etc.
+ * @desc Create payment intent for GCash or GrabPay
  * @body { amount, billing }
  */
 router.post("/:type/intent", async (req, res) => {
@@ -50,6 +49,16 @@ router.post("/:type/intent", async (req, res) => {
 
     const amountCentavos = Math.round(Number(amount) * 100);
 
+    // Prepare billing info
+    const billingData = {
+      name: billing?.name || `${paymentType.toUpperCase()} Payer`,
+      email: billing?.email || "payer@example.com",
+    };
+
+    // Add phone depending on payment type
+    if (paymentType === "gcash") billingData.gcashNumber = billing?.phone || "09123456789";
+    if (paymentType === "grab_pay") billingData.phone = billing?.phone || "09123456789";
+
     const source = await pmPost("https://api.paymongo.com/v1/sources", {
       data: {
         attributes: {
@@ -58,13 +67,9 @@ router.post("/:type/intent", async (req, res) => {
             success: "https://iskolardev.online/payment-success",
             failed: "https://iskolardev.online/payment-failed",
           },
-          type: paymentType,
+          type: paymentType, // "gcash" or "grabpay"
           currency: "PHP",
-          billing: {
-            name: billing?.name || `${paymentType.toUpperCase()} Payer`,
-            email: billing?.email || "payer@example.com",
-            phone: billing?.phone || "09123456789",
-          },
+          billing: billingData,
         },
       },
     });
