@@ -1,10 +1,12 @@
 import admin from "firebase-admin";
-import fs from "fs";
 
-// Local file path
-const serviceAccount = JSON.parse(
-  fs.readFileSync("./iskolardev-a1383-firebase-adminsdk-fbsvc-65910e56b9.json", "utf8")
-);
+let serviceAccount;
+
+if (process.env.FIREBASE_SERVICE_ACCOUNT) {
+  serviceAccount = JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT);
+} else {
+  serviceAccount = require("./iskolardev-a1383-firebase-adminsdk-fbsvc-65910e56b9.json");
+}
 
 if (!admin.apps.length) {
   admin.initializeApp({
@@ -12,6 +14,6 @@ if (!admin.apps.length) {
   });
 }
 
-export const db = admin.firestore();
+const db = admin.firestore();
 
-export { admin};
+export { admin, db };
