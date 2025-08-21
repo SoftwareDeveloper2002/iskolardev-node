@@ -9,12 +9,40 @@ import verifyRoutes from "./routes/verify.js";
 
 /* ------------------ EXPRESS INIT ------------------ */
 const app = express();
-app.use(cors({
-  origin: "https://iskolardev.online",  // your frontend domain
-  methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
-  allowedHeaders: ["Content-Type", "Authorization"],
-  credentials: true
-}));
+
+// Allow both production + local dev
+const allowedOrigins = [
+  "https://iskolardev.online",
+  "http://localhost:3000", // React/Vite dev
+  "http://127.0.0.1:3000"
+];
+
+// Dynamic CORS middleware
+app.use(
+  cors({
+    origin: function (origin, callback) {
+      if (!origin) return callback(null, true); // allow non-browser tools like curl/postman
+      if (allowedOrigins.includes(origin)) {
+        return callback(null, true);
+      } else {
+        return callback(new Error("Not allowed by CORS"));
+      }
+    },
+    methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+    allowedHeaders: ["Content-Type", "Authorization"],
+    credentials: true,
+  })
+);
+
+// Handle preflight for all routes
+app.options("*", (req, res) => {
+  res.header("Access-Control-Allow-Origin", req.headers.origin || "*");
+  res.header("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS");
+  res.header("Access-Control-Allow-Headers", "Content-Type, Authorization");
+  res.header("Access-Control-Allow-Credentials", "true");
+  return res.sendStatus(200);
+});
+
 app.use(express.json());
 
 /* ------------------ MAINTENANCE MODE ------------------ */
@@ -24,7 +52,8 @@ app.use((req, res, next) => {
   if (maintenanceMode) {
     return res.status(503).json({
       status: "maintenance",
-      message: "🚧 The system is currently under maintenance. Please try again later.",
+      message:
+        "🚧 The system is currently under maintenance. Please try again later.",
       timestamp: new Date().toISOString(),
     });
   }
