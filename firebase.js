@@ -1,4 +1,3 @@
-// firebase.js
 import admin from "firebase-admin";
 
 let serviceAccount;
