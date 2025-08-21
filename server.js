@@ -116,7 +116,7 @@ async function checkFirebaseAdmin() {
 }
 
 /* ------------------ SERVER ------------------ */
-const PORT = process.env.PORT || 8000;
+const PORT = process.env.PORT || 3000;
 
 checkFirebaseAdmin().then((ok) => {
   if (!ok) {
