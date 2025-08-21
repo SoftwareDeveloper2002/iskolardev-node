@@ -1,39 +1,28 @@
-# syntax = docker/dockerfile:1
+# Use official Python image
+FROM python:3.12-slim
 
-# Adjust NODE_VERSION as desired
-ARG NODE_VERSION=20.19.0
-FROM node:${NODE_VERSION}-slim AS base
-
-LABEL fly_launch_runtime="Node.js"
-
-# Node.js app lives here
+# Set working directory
 WORKDIR /app
 
-# Set production environment
-ENV NODE_ENV="production"
+# Set environment variables
+ENV PYTHONDONTWRITEBYTECODE=1
+ENV PYTHONUNBUFFERED=1
 
-
-# Throw-away build stage to reduce size of final image
-FROM base AS build
-
-# Install packages needed to build node modules
+# Install system dependencies
 RUN apt-get update -qq && \
-    apt-get install --no-install-recommends -y build-essential node-gyp pkg-config python-is-python3
+    apt-get install --no-install-recommends -y build-essential
 
-# Install node modules
-COPY package-lock.json package.json ./
-RUN npm ci
+# Copy Python dependencies files
+COPY requirements.txt .
 
-# Copy application code
+# Install Python dependencies
+RUN pip install --no-cache-dir -r requirements.txt
+
+# Copy the rest of the application
 COPY . .
 
+# Expose the port your Flask app runs on
+EXPOSE 5000
 
-# Final stage for app image
-FROM base
-
-# Copy built application
-COPY --from=build /app /app
-
-# Start the server by default, this can be overwritten at runtime
-EXPOSE 3000
-CMD [ "npm", "run", "start" ]
+# Default command to run the app
+CMD ["python", "app.py"]
