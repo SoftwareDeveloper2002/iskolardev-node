@@ -1,6 +1,6 @@
 // routes/verify.js
 import express from "express";
-import { db, admin } from "../firebase_admin.js";
+import { db, admin } from "../firebase.js";
 
 const router = express.Router();
 

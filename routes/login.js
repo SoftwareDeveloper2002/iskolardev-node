@@ -1,6 +1,6 @@
 // routes/login.js
 import express from "express";
-import { db, admin } from "../firebase_admin.js"; // ✅ make sure firebase_admin.js exports admin too
+import { db, admin } from "../firebase.js"; // ✅ make sure firebase_admin.js exports admin too
 
 const router = express.Router();
 

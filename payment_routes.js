@@ -1,7 +1,7 @@
 // payment_routes.js
 import express from "express";
 import fetch from "node-fetch";
-import { db, admin } from "./firebase_admin.js"; // Firebase Admin SDK
+import { db, admin } from "./firebase.js"; // Firebase Admin SDK
 
 const router = express.Router();
 
