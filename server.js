@@ -9,7 +9,12 @@ import verifyRoutes from "./routes/verify.js";
 
 /* ------------------ EXPRESS INIT ------------------ */
 const app = express();
-app.use(cors({ origin: true }));
+app.use(cors({
+  origin: "https://iskolardev.online",  // your frontend domain
+  methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+  allowedHeaders: ["Content-Type", "Authorization"],
+  credentials: true
+}));
 app.use(express.json());
 
 /* ------------------ MAINTENANCE MODE ------------------ */
